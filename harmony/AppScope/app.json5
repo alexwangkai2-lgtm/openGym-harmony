@@ -1,0 +1,15 @@
+{
+  "app": {
+    "bundleName": "ch.duartesantos.opengym",
+    "vendor": "duartesantos",
+    "versionCode": 1004000,
+    "versionName": "1.4.0",
+    "icon": "$media:app_icon",
+    "label": "$string:app_name",
+    "apiVersion": {
+      "compatible": 12,
+      "target": 12,
+      "releaseType": "Release"
+    }
+  }
+}

@@ -1,0 +1,6 @@
+# Define project specific obfuscation rules here.
+#
+# Obfuscation is disabled in entry/build-profile.json5 ("enable": false): the shell is a thin
+# bridge and the bundle it serves is JavaScript, so there is little for the obfuscator to gain
+# and a renamed bridge method would break `javaScriptProxy`'s methodList. Re-enable only with a
+# rule that keeps every name the WebView reaches by string.

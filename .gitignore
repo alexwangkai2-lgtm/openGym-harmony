@@ -1,0 +1,55 @@
+# Exercise media downloaded by installs before v1.4.0 (now in catalogue/media); kept ignored so an
+# old folder never gets committed by accident
+media/img/
+media/gif/
+
+# Exercise stills and animations themselves — 263 MB across 13k files, and licensed from Gym
+# visual for openGym rather than redistributable from this fork. catalogue/media/NOTICE.md is
+# kept so the attribution travels with the code; run the project's own staging step (or point
+# APP_MEDIA_DIR at a copy) to get the files back.
+catalogue/media/still/
+catalogue/media/clip/
+
+# Runtime data — users, passkeys, per-user state, session secret
+data/
+
+# Local config
+.env
+
+# Build output / deps
+frontend/dist/
+node_modules/
+*.log
+.DS_Store
+node_modules
+.claude/
+.agents/
+.superpowers/
+
+# Nix build result symlinks
+result
+result-*
+
+# CI reports (test:* jobs write these next to the suites)
+junit.xml
+coverage/
+frontend/bundle-size.json
+
+# Local planning notes
+docs/superpowers/plans/
+
+# HarmonyOS shell. The web bundle inside the HAP is build output (harmony/scripts/sync-web.mjs
+# replaces it wholesale) and the signing material is DevEco's to write; neither belongs in a commit.
+harmony/entry/src/main/resources/rawfile/www/
+harmony/build/
+harmony/entry/build/
+harmony/.hvigor/
+harmony/oh_modules/
+harmony/entry/oh_modules/
+harmony/oh-package-lock.json5
+harmony/.clangd
+harmony/.clang-format
+harmony/.clang-tidy
+harmony/local.properties
+harmony/signature/
+harmony/.idea/

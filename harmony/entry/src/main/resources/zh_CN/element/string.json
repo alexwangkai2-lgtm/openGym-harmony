@@ -1,0 +1,36 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "openGym 自托管健身与体重追踪"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "openGym"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "openGym"
+    },
+    {
+      "name": "reason_internet",
+      "value": "连接你自己的 openGym 服务器以同步训练记录"
+    },
+    {
+      "name": "reason_reminder",
+      "value": "在计划训练日到来时提醒你"
+    },
+    {
+      "name": "reason_vibrate",
+      "value": "一组休息结束时震动提醒"
+    },
+    {
+      "name": "reason_camera",
+      "value": "拍摄自建动作的照片或视频，以及扫描签到码"
+    },
+    {
+      "name": "reason_microphone",
+      "value": "为自建动作视频录制声音"
+    }
+  ]
+}

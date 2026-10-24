@@ -1,0 +1,36 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "openGym self-hosted gym and body-weight tracker"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "openGym"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "openGym"
+    },
+    {
+      "name": "reason_internet",
+      "value": "Connect to your own openGym server to sync your training log"
+    },
+    {
+      "name": "reason_reminder",
+      "value": "Remind you when a planned workout day arrives"
+    },
+    {
+      "name": "reason_vibrate",
+      "value": "Vibrate when a rest period ends during a workout"
+    },
+    {
+      "name": "reason_camera",
+      "value": "Photograph or film a custom exercise, and scan a check-in code"
+    },
+    {
+      "name": "reason_microphone",
+      "value": "Record sound with a custom exercise video"
+    }
+  ]
+}

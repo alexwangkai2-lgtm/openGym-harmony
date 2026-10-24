@@ -1,0 +1,9 @@
+{
+  "name": "entry",
+  "version": "1.0.0",
+  "description": "openGym entry module",
+  "main": "",
+  "author": "duartesantos",
+  "license": "AGPL-3.0-or-later",
+  "dependencies": {}
+}

@@ -1,0 +1,8 @@
+{
+  "allowToBackupRestore": true,
+  "extraInfo": {
+    "exclude": [
+      "rawfile/www"
+    ]
+  }
+}
