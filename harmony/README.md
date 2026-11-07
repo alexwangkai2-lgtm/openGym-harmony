@@ -55,14 +55,16 @@ automatic), and run on a device or emulator. `hdc install` works too, but a sign
 the debug signature DevEco generates is enough.
 
 There is no `hvigorw` wrapper committed: DevEco generates it on first open. `oh-package.json5` has
-no dependencies to fetch.
+no dependencies to fetch. `hvigor/hvigor-config.json5` keeps `execution.daemon` off: a CLI build
+started from an automation shell loses its daemon to SIGHUP and then waits forever on the broken
+process. Turn it back on for interactive builds, where the daemon speeds up incremental compiles.
 
 ## How the shell is wired
 
 ```
 entry/src/main/ets/
-  entryability/EntryAbility.ets      UIAbility: foreground/background, back press, full-screen window
-  pages/Index.ets                    the ArkWeb view, the injected shim, local media, permissions
+  entryability/EntryAbility.ets      UIAbility: foreground/background, full-screen window
+  pages/Index.ets                    ArkWeb view, injected shim, local origins, permissions, back press
   bridge/
     Shim.ets                         the JS injected on document start (see below)
     CapacitorBridge.ets              postMessage → plugin, and the answers back via runJavaScript

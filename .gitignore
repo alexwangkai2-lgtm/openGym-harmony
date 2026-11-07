@@ -53,3 +53,8 @@ harmony/.clang-tidy
 harmony/local.properties
 harmony/signature/
 harmony/.idea/
+
+# Local devecocli / emulator verification artefacts (not part of the app)
+harmony/*log*.txt
+harmony/code-linter.json5
+.workbuddy/

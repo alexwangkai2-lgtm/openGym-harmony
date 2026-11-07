@@ -1,0 +1,12 @@
+{
+  "modelVersion": "26.0.0",
+  "dependencies": {},
+  "execution": {
+    // Inline build. When a CLI build is driven from an automation shell, the daemon
+    // child inherits the shell console and is killed with SIGHUP as soon as the
+    // command slot ends. The client then waits forever on a "broken" daemon.
+    // Set this back to true (or delete the "execution" block) for faster incremental
+    // builds in DevEco Studio or an interactive terminal, where the daemon survives.
+    "daemon": false
+  }
+}
