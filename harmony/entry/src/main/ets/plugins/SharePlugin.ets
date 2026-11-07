@@ -86,7 +86,12 @@ export class SharePlugin extends CapacitorPlugin {
           title: one.slice(one.lastIndexOf('/') + 1)
         });
       }
-      return new systemShare.SharedData(...records);
+      // SharedData takes one record at a time; the rest are appended.
+      const data: systemShare.SharedData = new systemShare.SharedData(records[0]);
+      for (let i = 1; i < records.length; i++) {
+        data.addRecord(records[i]);
+      }
+      return data;
     }
     return new systemShare.SharedData({
       utd: utd.UniformDataType.PLAIN_TEXT,

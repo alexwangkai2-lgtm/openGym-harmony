@@ -2,15 +2,12 @@ import { AbilityConstant, UIAbility, Want } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import { webview } from '@kit.ArkWeb';
-import { isPageReady } from '../common/RuntimeState';
 
 const DOMAIN = 0x0000;
 const TAG = 'openGym';
 
 /** Shared with pages/Index.ets — the foreground/background signal the app listens for. */
 const APP_STATE_EVENT: string = 'og.appState';
-/** Shared with pages/Index.ets — the system back press, forwarded for the page to interpret. */
-const BACK_EVENT: string = 'og.backPress';
 
 export default class EntryAbility extends UIAbility {
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
@@ -63,24 +60,17 @@ export default class EntryAbility extends UIAbility {
   }
 
   /**
-   * The system back gesture and the navigation bar's back button.
+   * Back press fallback — the real handler is `onBackPress()` on the `@Entry` component in
+   * pages/Index.ets.
    *
-   * Without this, back closes the app from wherever the user happens to be — the same problem the
-   * Android build had before frontend/src/lib/back.js existed (`BridgeActivity` does not handle
-   * back at all, so a swipe quit from anywhere and the app's own history was dead weight). The
-   * page already knows what back should mean: close the top sheet, walk its own history, and on a
-   * second press leave through `App.exitApp()`. So the press is forwarded and consumed, and the
-   * page decides.
-   *
-   * Before the first page load there is no page to ask and nothing to walk back through, so the
-   * press is left to the system — which is the behaviour the user expects from a still-blank app.
+   * This matters: `UIAbility.onBackPressed()`'s return value does NOT mean "I consumed the
+   * press". Per the SDK, `true` means the ability is *moved to the background* (and kept alive),
+   * `false` means it is *destroyed* — either way the user leaves the app. Only ArkUI's page-level
+   * `onBackPress(): true` actually keeps the window on screen. This callback is reached only
+   * before the page is ready, or if the page declines the press; in that case background the
+   * ability rather than destroy it, so a relaunch restores the WebView and its state.
    */
   onBackPressed(): boolean {
-    if (!isPageReady()) {
-      return false;
-    }
-    hilog.info(DOMAIN, TAG, 'back press forwarded to the page');
-    this.context.eventHub.emit(BACK_EVENT);
     return true;
   }
 }

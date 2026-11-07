@@ -10,8 +10,9 @@ import { webview } from '@kit.ArkWeb';
 import { CapacitorBridge } from '../bridge/CapacitorBridge';
 import { attachAll, pluginHeaders, registerPlugin } from '../bridge/PluginRegistry';
 import { buildShim } from '../bridge/Shim';
+import { APP_ENTRY_URL, APP_ORIGIN, appRawFilePathFrom } from '../common/AppOrigin';
 import { mediaPathFrom, mimeForPath } from '../common/MediaOrigin';
-import { isAppActive, setAppActive, setPageReady } from '../common/RuntimeState';
+import { isAppActive, isPageReady, setAppActive, setPageReady } from '../common/RuntimeState';
 import { AppPlugin } from '../plugins/AppPlugin';
 import { FilesystemPlugin } from '../plugins/FilesystemPlugin';
 import { LocalNotificationsPlugin } from '../plugins/LocalNotificationsPlugin';
@@ -26,8 +27,6 @@ const TAG = 'openGym';
 
 /** Shared with entryability/EntryAbility.ets — foreground/background transitions. */
 const APP_STATE_EVENT: string = 'og.appState';
-/** Shared with entryability/EntryAbility.ets — the system back press, and nothing else. */
-const BACK_EVENT: string = 'og.backPress';
 
 /** The media permissions the app's own capture flow asks the WebView for. */
 const CAPTURE_PERMISSIONS: Permissions[] = ['ohos.permission.CAMERA', 'ohos.permission.MICROPHONE'];
@@ -75,9 +74,10 @@ class NativeProxy {
  *     `onPageEnd`.
  *
  * `base: './'` is set in frontend/vite.config.js, so the bundle's asset URLs are relative and
- * resolve under `resource://rawfile/www/`. The router is a HashRouter (frontend/src/App.jsx), so
- * no server-side rewrite is needed either — the two together are what make loading straight from
- * rawfile viable at all.
+ * resolve under the shell's pretend HTTPS origin, where `onInterceptRequest` maps them back to
+ * `rawfile/www/`. The router is a HashRouter (frontend/src/App.jsx), so no server-side rewrite is
+ * needed either — the two together are what make serving the bundle out of rawfile viable.
+ * See common/AppOrigin.ets for why the origin cannot be `resource://` itself.
  */
 @Entry
 @Component
@@ -108,13 +108,6 @@ struct Index {
       this.bridge.notifyAppState(active);
     });
 
-    ctx.eventHub.on(BACK_EVENT, () => {
-      // The page decides what a back press means — a sheet closes, its own history walks back,
-      // and only a second press leaves the app. `accessBackward()` is the WebView's own history,
-      // which is what the app passes to its decision table as `canGoBack`.
-      this.bridge.notifyBack(this.controller.accessBackward());
-    });
-
     hilog.info(DOMAIN, TAG, 'shell ready, %{public}d plugin(s) bridged', pluginHeaders().length);
   }
 
@@ -123,11 +116,31 @@ struct Index {
     if (ctx !== null) {
       try {
         ctx.eventHub.off(APP_STATE_EVENT);
-        ctx.eventHub.off(BACK_EVENT);
       } catch (e) {
         // Ability already gone.
       }
     }
+  }
+
+  /**
+   * The system back gesture and the navigation bar's back button.
+   *
+   * This MUST be the page-level ArkUI callback, not `UIAbility.onBackPressed()`: the latter's
+   * return value only chooses between "move to background" and "destroy" — either way the app
+   * disappears. Returning true here is what actually keeps the window on screen and lets the web
+   * app decide: close a sheet, walk its HashRouter history, or arm "press back again to exit".
+   *
+   * Before the first page load there is nothing to ask, so the press is left to the system —
+   * which is the behaviour the user expects from a still-blank app.
+   */
+  onBackPress(): boolean {
+    if (!isPageReady()) {
+      return false;
+    }
+    // `accessBackward()` is the WebView's own history — the same figure the Android plugin
+    // reports, and the `canGoBack` input to the app's decision table in lib/back.js.
+    this.bridge.notifyBack(this.controller.accessBackward());
+    return true;
   }
 
   /** Idempotent — `aboutToAppear` can run again after a configuration change. */
@@ -145,6 +158,72 @@ struct Index {
     registerPlugin(new SharePlugin());
     registerPlugin(new SystemBarsPlugin());
     registerPlugin(new PrintPlugin());
+  }
+
+  /**
+   * Answer a request for a file in the bundled web app — `https://opengym.app/<path>`.
+   *
+   * The whole `rawfile/www/` tree is served through here rather than loaded as `resource://`.
+   * See common/AppOrigin.ets: module scripts and `crossorigin` stylesheets cannot be fetched
+   * from `resource://`, so this is what makes the bundle execute at all.
+   *
+   * `getRawFileContentSync` reads a whole file into memory. Every file in the bundle is small
+   * (a JS chunk, a CSS file, a 180px exercise still); the large media the app records itself is
+   * not here, it lives in the sandbox and is served by `localMediaResponse` below.
+   *
+   * A missing file is answered with 404 instead of null: returning null would hand the request
+   * to ArkWeb, which would try to reach a host that does not exist and stall the page load.
+   */
+  private localAppResponse(url: string): WebResourceResponse | null {
+    const ctx: common.UIAbilityContext | null = this.abilityContext;
+    if (ctx === null) {
+      return null;
+    }
+    const rawPath: string | null = appRawFilePathFrom(url);
+    if (rawPath === null) {
+      return null;
+    }
+    let bytes: Uint8Array;
+    try {
+      bytes = ctx.resourceManager.getRawFileContentSync(rawPath);
+    } catch (e) {
+      hilog.warn(DOMAIN, TAG, 'bundle asset not found: %{public}s', url);
+      return this.emptyResponse(404, 'Not Found');
+    }
+    // setResponseData takes an ArrayBuffer, not a Uint8Array; copy rather than rely on the
+    // Uint8Array's backing buffer being exactly the right length and offset.
+    const body: ArrayBuffer = new ArrayBuffer(bytes.length);
+    const view: Uint8Array = new Uint8Array(body);
+    view.set(bytes);
+    const mime: string = mimeForPath(rawPath);
+    const response = new WebResourceResponse();
+    response.setResponseCode(200);
+    response.setReasonMessage('OK');
+    response.setResponseMimeType(mime);
+    response.setResponseHeader([
+      { headerKey: 'Content-Type', headerValue: mime },
+      // Module scripts are fetched in CORS mode even when same-origin. Keep the header so a
+      // stray cross-origin request from the page cannot turn into a blank screen.
+      { headerKey: 'Access-Control-Allow-Origin', headerValue: '*' },
+      { headerKey: 'Cache-Control', headerValue: 'no-store' }
+    ]);
+    response.setResponseData(body);
+    response.setResponseIsReady(true);
+    return response;
+  }
+
+  /** A tiny response used for 404s; never falls through to the network. */
+  private emptyResponse(code: number, reason: string): WebResourceResponse {
+    const response = new WebResourceResponse();
+    response.setResponseCode(code);
+    response.setReasonMessage(reason);
+    response.setResponseMimeType('text/plain');
+    response.setResponseHeader([
+      { headerKey: 'Content-Type', headerValue: 'text/plain; charset=utf-8' }
+    ]);
+    response.setResponseData('');
+    response.setResponseIsReady(true);
+    return response;
   }
 
   /**
@@ -208,7 +287,7 @@ struct Index {
     // own `Header` type exactly, and this way the compiler checks them against it.
     response.setResponseHeader([
       { headerKey: 'Content-Type', headerValue: mime },
-      // The page runs on resource://rawfile, so this is a cross-origin fetch. Images and video
+      // The page runs on https://opengym.app, so this is a cross-origin fetch. Images and video
       // would load without it; `fetch` would not.
       { headerKey: 'Access-Control-Allow-Origin', headerValue: '*' },
       // One response per file, rebuilt on every launch — a stale cache would show the wrong
@@ -265,9 +344,9 @@ struct Index {
     options.maxSelectNumber = multiple ? MAX_PICK : 1;
     // The app re-encodes and stores what it is given; the untouched original is not wanted.
     options.isOriginalSupported = false;
-    // The picker is handed the ability context: the no-argument constructor is deprecated since
-    // API 12, and the context-bound one resolves the caller's window reliably.
-    const picked = await new photoAccessHelper.PhotoViewPicker(ctx).select(options);
+    // PhotoViewPicker has no context-bound constructor in this SDK (unlike DocumentViewPicker);
+    // the window it resolves is the caller's anyway.
+    const picked = await new photoAccessHelper.PhotoViewPicker().select(options);
     return picked.photoUris;
   }
 
@@ -328,7 +407,7 @@ struct Index {
 
   build() {
     Column() {
-      Web({ src: $rawfile('www/index.html'), controller: this.controller })
+      Web({ src: APP_ENTRY_URL, controller: this.controller })
         // localStorage: the app's primary store. Without it every launch is a fresh profile.
         .domStorageAccess(true)
         .fileAccess(true)
@@ -350,12 +429,17 @@ struct Index {
         })
         // Document start, not page end — see bridge/Shim.ets for the failure this prevents.
         .runJavaScriptOnDocumentStart([{ script: this.shim, scriptRules: ['*'] }])
-        // Local media, served out of the sandbox. Everything else is left alone.
+        // Two pretend hosts, both answered from this device: the bundled web app out of
+        // rawfile, and the app's own media out of its sandbox. Everything else is left alone.
         .onInterceptRequest((event) => {
           if (!event) {
             return null;
           }
-          return this.localMediaResponse(event.request.getRequestUrl());
+          const url: string = event.request.getRequestUrl();
+          if (url.startsWith(APP_ORIGIN)) {
+            return this.localAppResponse(url);
+          }
+          return this.localMediaResponse(url);
         })
         // <input type="file"> from the page. Returning true hands the selection to us: see
         // pickFiles below for which picker each input gets.

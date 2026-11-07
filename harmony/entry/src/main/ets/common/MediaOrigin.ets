@@ -85,10 +85,35 @@ export function mimeForPath(path: string): string {
     case 'webm':
       return 'video/webm';
     case 'json':
+    case 'map':
+    case 'webmanifest':
       return 'application/json';
     case 'html':
     case 'htm':
       return 'text/html';
+    // The same lookup serves the app bundle under APP_ORIGIN, so the content types a browser
+    // insists on are here too. A module script served as octet-stream is refused by Blink.
+    case 'js':
+    case 'mjs':
+      return 'text/javascript';
+    case 'css':
+      return 'text/css';
+    case 'svg':
+      return 'image/svg+xml';
+    case 'ico':
+      return 'image/x-icon';
+    case 'txt':
+      return 'text/plain';
+    case 'woff':
+      return 'font/woff';
+    case 'woff2':
+      return 'font/woff2';
+    case 'ttf':
+      return 'font/ttf';
+    case 'otf':
+      return 'font/otf';
+    case 'wasm':
+      return 'application/wasm';
     default:
       // The media store keeps a playable extension per mime; anything else is served as bytes.
       return 'application/octet-stream';

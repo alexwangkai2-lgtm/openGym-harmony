@@ -64,9 +64,9 @@ export class CapacitorBridge {
 
     const plugin = pluginFor(pluginId);
     if (plugin === undefined) {
-      this.replyFn(callbackId, false,
-        JSON.stringify({ 'message': `"${pluginId}" is not available on platform "harmony"`, 'code': 'UNIMPLEMENTED' }
-          as JsonObject));
+      const unimplemented: JsonObject =
+        { 'message': pluginId + ' is not available on platform "harmony"', 'code': 'UNIMPLEMENTED' };
+      this.replyFn(callbackId, false, JSON.stringify(unimplemented));
       return 'no-plugin';
     }
 

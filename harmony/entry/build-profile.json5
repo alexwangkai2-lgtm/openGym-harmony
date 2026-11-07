@@ -1,11 +1,6 @@
 {
   "apiType": "stageMode",
-  "buildOption": {
-    "strictMode": {
-      "caseSensitiveCheck": true,
-      "useDefineForClassFieldsCheck": true
-    }
-  },
+  "buildOption": {},
   "buildOptionSet": [
     {
       "name": "release",

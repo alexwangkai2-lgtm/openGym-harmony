@@ -74,10 +74,11 @@ entry/src/main/ets/
   common/
     JsonUtil.ets                     JSON/base64 without `any`
     RuntimeState.ets                 foreground state, bundle facts, page-ready flag
-    MediaOrigin.ets                  the origin local files are published under
+    MediaOrigin.ets                  the origin sandbox media is published under
+    AppOrigin.ets                    the https origin the whole web bundle is published under
 ```
 
-Three details in there are load-bearing, and each cost real debugging:
+Four details in there are load-bearing, and each cost real debugging:
 
 **The shim is injected on document start, not on page end.** `@capacitor/core` reads
 `window.CapacitorCustomPlatform` into a module-level constant the moment the module is evaluated,
@@ -97,6 +98,23 @@ hold it and push events back. No shim can capture it. So `AppPlugin` deliberatel
 tells the page when it is backgrounded, the shim replaces `document.hidden`/`visibilityState`, and
 a real change re-dispatches the event. Four behaviours depend on it — the reminder window
 re-scheduling, the rest timer's catch-up rule, the screen wake lock, and flushing media writes.
+
+**The page runs on `https://opengym.app/`, not on `resource://`.** Vite emits
+`<script type="module" crossorigin>` and `<link rel="stylesheet" crossorigin>`; those are fetched
+in CORS mode, and a `resource://rawfile` document has an opaque `null` origin. ArkWeb refuses CORS
+for that scheme ("Cross origin requests are only supported for protocol schemes: ... http, https"),
+so the HTML and its icon loaded and every script and stylesheet was silently blocked — a permanent
+blank screen. This is the documented ArkWeb local-resource limitation; the fix is Huawei's own
+recommended one: a custom HTTPS origin whose requests `onInterceptRequest` answers out of
+`rawfile/www/`. It also gives the document a real origin, so `localStorage` works and module
+scripts are same-origin. `AppOrigin.ets` maps the URL back to a rawfile path and refuses anything
+that could climb out of `www/`.
+
+**Back belongs to `Index.onBackPress()`, not `UIAbility.onBackPressed()`.** The ability-level
+callback's return value does not mean "consumed": per the SDK, `true` moves the UIAbility to the
+background and `false` destroys it — either way the app disappears. Only the page-level
+`@Entry` callback returning `true` keeps the window on screen. That is where the press is now
+forwarded to `lib/back.js`.
 
 ## What works, and what does not
 
@@ -120,24 +138,49 @@ check-in codes, server pairing and sync, and the system back gesture.
 | `CapacitorHttp` | Not bridged; `nativeFetch()` uses the page's own `fetch`. Same requests, no native cookie jar. |
 | Print | Writes the HTML to the cache dir and opens the share sheet rather than the system print pipeline. |
 
-**Not verified yet.** No part of this has been compiled or run on a device: the machine that wrote
-it has no HarmonyOS SDK, and the project's own test suite runs on `happy-dom`/`linkedom` and never
-touched a real WebView. The ArkTS was, however, read once more against the API 12 SDK surface after
-the first draft, and four real defects were fixed in that pass: `JsonUtil.arr()` was being handed a
-`PluginCall` where it wants a `JsonObject` (SharePlugin, RestAlertPlugin — both now use
-`PluginCall.getArray`), a `Map.get()` result typed `Value | undefined` was annotated `Object`
-(SecureStoragePlugin — now narrowed with `instanceof`), the photo/document pickers used the
-constructors deprecated in API 12 (now context-bound), and `KEEP_BACKGROUND_RUNNING` was declared
-for a background task nothing holds. `rawfile/www/` ships pre-built with this tree (243 MB, the
-`VITE_MOBILE=1` bundle plus staged exercise media, verified by `checkCopy`), so step 1–3 of the
-build section are only needed when the web bundle changes. The verify checklist below is the order
-worth doing it in.
+**Verified on an emulator (2026-11-07).** `devecocli build` compiles the whole tree against the
+real API 12 SDK (`BUILD SUCCESSFUL`, 33 tasks, only warnings). The unsigned HAP was signed with
+the SDK's local OpenHarmony debug certificate and installed on the Mate 90 Pro emulator
+(HarmonyOS 7.0.0 / API 26, `127.0.0.1:5555`); `install bundle successfully`, `start ability
+successfully`. Boot, the onboarding choice, the dashboard, the starter-plan sheet, Settings and
+the reminder toggle all render and respond; force-stopping and relaunching keeps the state
+(`localStorage`); opening the reminder switch raised the real system notification permission
+dialog, which proves the Capacitor bridge reaches the ArkTS plugins; from a sub-screen back walks
+the page history, and on the dashboard a first back arms "press again to exit" and a second one
+leaves. No CORS errors, no JS console errors, no crash logs.
+
+Getting there exposed three defects that static review had missed, all fixed below:
+
+1. **Blank screen** — `resource://` cannot serve CORS-fetched module scripts. Fixed with the
+   `https://opengym.app/` origin described above.
+2. **Back quit the app on the first press** — the handler was on `UIAbility.onBackPressed()`,
+   which cannot keep the window open. Moved to `Index.onBackPress()`.
+3. **Back then did nothing at all** — the shim dispatched `opengym:back` on `document` while
+   `lib/back.js` listens on `window`; a non-bubbling `CustomEvent` never reached it. Now
+   dispatched on `window`.
+
+Earlier, a read-through against the API 12 SDK surface had already fixed four compile-level
+defects: `JsonUtil.arr()` being handed a `PluginCall` (SharePlugin, RestAlertPlugin — now
+`PluginCall.getArray`), a `Map.get()` result typed `Object` (SecureStoragePlugin — now narrowed
+with `instanceof`), the API 12 picker constructors, and an unused
+`KEEP_BACKGROUND_RUNNING` declaration. `rawfile/www/` ships pre-built with this tree (243 MB,
+the `VITE_MOBILE=1` bundle plus staged exercise media, verified by `checkCopy`), so steps 1–3 of
+the build section are only needed when the web bundle changes.
+
+Still not exercised on a device: the screen-off rest alert firing, custom-exercise media through
+`https://opengym.media/`, camera/microphone capture inside the WebView, and pairing with a server.
+Those need a longer interactive session or real media; the checklist below is the order to do it
+in.
 
 ## Verify on a device
 
+Items 1, 2 and 7 were exercised on the emulator — see the status above. The rest still needs a
+real interactive session or real media.
+
 1. **It boots at all** — the app opens on the dashboard, not a blank screen. If blank, check the
-   ArkWeb console through `hdc hilog | grep openGym`: a shim that did not load logs
-   `the native bridge is not attached to this page`.
+   ArkWeb console through `devecocli log --keyword CONSOLE`: `Access to script ... blocked by CORS
+   policy` means the page is back on `resource://` instead of `https://opengym.app/`, and a shim
+   that did not load logs `the native bridge is not attached to this page`.
 2. **State survives a restart** — log a workout, force-stop, reopen: the entry is there (that is
    `Filesystem` + `localStorage`).
 3. **Background it and come back** — the reminder window is re-scheduled on the way back. Watch for

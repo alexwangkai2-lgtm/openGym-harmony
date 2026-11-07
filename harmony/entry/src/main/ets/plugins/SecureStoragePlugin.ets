@@ -111,8 +111,9 @@ export class SecureStoragePlugin extends CapacitorPlugin {
     try {
       const results: asset.AssetMap[] = await asset.query(query);
       if (results.length === 0) {
-        // Capacitor's secure-storage answers null for a key that was never set.
-        call.resolve({ 'value': null } as JsonObject);
+        // Capacitor's secure-storage answers null for a key that was never set. Parsed rather
+        // than written as a literal: ArkTS has no slot for a JSON null inside Record<string, Object>.
+        call.resolve(JSON.parse('{"value":null}') as JsonObject);
         return;
       }
       // Typed by inference (`Value | undefined`): an explicit `Object` annotation would not
@@ -122,7 +123,7 @@ export class SecureStoragePlugin extends CapacitorPlugin {
       call.resolve({ 'value': text } as JsonObject);
     } catch (e) {
       // NOT_FOUND arrives as a rejection on some builds rather than an empty result.
-      call.resolve({ 'value': null } as JsonObject);
+      call.resolve(JSON.parse('{"value":null}') as JsonObject);
     }
   }
 

@@ -235,7 +235,10 @@ export class LocalNotificationsPlugin extends CapacitorPlugin {
     }
     let granted: boolean = false;
     try {
-      granted = await notificationManager.requestEnableNotification(ctx);
+      // requestEnableNotification only pops the system dialog (synchronous void); the answer
+      // has to be read back from isNotificationEnabled once the user has answered it.
+      notificationManager.requestEnableNotification(ctx);
+      granted = await notificationManager.isNotificationEnabled();
     } catch (e) {
       granted = false;
     }

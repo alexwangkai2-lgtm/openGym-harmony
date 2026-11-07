@@ -149,10 +149,15 @@ const SHIM_HEAD = `
      cannot be reached from the shell (see the note at the top), and AppWeb has no DOM event for
      it. So the shell dispatches its own, and lib/back.js subscribes to it on this platform
      instead of asking for a native listener. The decision table behind it — close a sheet, walk
-     history, press-again-to-exit — is untouched and still the only place that decides. */
+     history, press-again-to-exit — is untouched and still the only place that decides.
+
+     Dispatch on 'window', not 'document': lib/back.js registers its listener with
+     window.addEventListener(HARMONY_BACK_EVENT, onBack), and a CustomEvent does not bubble
+     by default. Dispatching on document here drops the event on the floor — the shell consumes
+     the press, the page never hears about it, and back appears to do nothing. */
   window.__ogBack = function (canGoBack) {
     try {
-      document.dispatchEvent(new CustomEvent('opengym:back', { detail: { canGoBack: canGoBack === true } }));
+      window.dispatchEvent(new CustomEvent('opengym:back', { detail: { canGoBack: canGoBack === true } }));
     } catch (e) { }
   };
 

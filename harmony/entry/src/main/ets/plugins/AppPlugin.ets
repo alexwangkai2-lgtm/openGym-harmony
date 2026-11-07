@@ -41,9 +41,15 @@ export class AppPlugin extends CapacitorPlugin {
 
   handle(call: PluginCall): void {
     switch (call.methodName) {
-      case 'getInfo':
-        call.resolve(this.info() as JsonObject);
+      case 'getInfo': {
+        // Built field by field: an interface without an index signature cannot be cast to
+        // JsonObject, and the four keys are exactly what @capacitor/app's getInfo returns.
+        const info: ShellInfo = this.info();
+        const payload: JsonObject =
+          { 'id': info.id, 'name': info.name, 'version': info.version, 'build': info.build };
+        call.resolve(payload);
         return;
+      }
       case 'getState':
         call.resolve({ 'isActive': isAppActive() } as JsonObject);
         return;
