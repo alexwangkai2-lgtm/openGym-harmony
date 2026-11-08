@@ -7,7 +7,7 @@
 # QEMU — and QEMU-emulated npm installs are known to corrupt esbuild/rollup's platform-
 # specific native binaries, which is what breaks `vite build` with unrelated-looking
 # module-resolution errors.
-FROM --platform=$BUILDPLATFORM node:22.23.4-alpine AS build
+FROM --platform=$BUILDPLATFORM node:26.12.1-alpine AS build
 # The frontend sits at /app/frontend, not /app: the Coach's runtime-neutral core lives in
 # api/coach/core and is imported from frontend/src as ../../../api/coach/core/*, so the two
 # have to keep the same relative position they have in the repository. Copying frontend/ alone
