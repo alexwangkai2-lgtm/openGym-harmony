@@ -54,6 +54,14 @@ harmony/.clang-tidy
 harmony/local.properties
 harmony/signature/
 harmony/.idea/
+# DevEco automatic signing material: private keys and Huawei-issued certs/profiles must never be
+# committed if they are written into the project instead of the user's ~/.ohos/config
+harmony/*.p12
+harmony/*.p7b
+harmony/*.cer
+harmony/*.csr
+harmony/.ohos/
+harmony/signing-config.properties
 
 # Local devecocli / emulator verification artefacts (not part of the app)
 harmony/*log*.txt

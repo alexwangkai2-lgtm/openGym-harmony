@@ -52,8 +52,19 @@ the project's own `checkCopy` — the same guard that stops a stray web build (a
 passkey login screen) from being packaged into an app.
 
 Then open `harmony/` in DevEco Studio, sign the HAP (Project Structure → Signing Configs →
-automatic), and run on a device or emulator. `hdc install` works too, but a signature is required;
-the debug signature DevEco generates is enough.
+automatic), and run on a device or emulator. `hdc install` works too, but a signature is required.
+
+**Signing differs between an emulator and a retail phone.** A retail HarmonyOS device only trusts
+Huawei's CA, so it needs a HarmonyOS debug signature from automatic signing
+(`devecocli auth login` → `devecocli signature generate`, or the GUI's Signing Configs). The
+account must be real-name verified in AppGallery Connect, and the generated `.p7b` is bound to the
+bundle name plus the device UDID (`hdc -t <serial> shell "bm get --udid"`). An OpenHarmony image /
+the DevEco emulator also accepts the SDK's own `OpenHarmony.p12` chain signed offline with
+`hap-sign-tool.jar`; that same HAP is rejected on a retail phone with
+`9568257 fail to verify pkcs7 file` — the device log reads
+`HapVerify: it do not come from trusted root, issuer: ... OpenHarmony Application Root CA`.
+Emulator-only development never needs a Huawei account, and there is no device switch that
+disables the certificate-chain check.
 
 There is no `hvigorw` wrapper committed: DevEco generates it on first open. `oh-package.json5` has
 no dependencies to fetch. `hvigor/hvigor-config.json5` keeps `execution.daemon` off: a CLI build
@@ -152,6 +163,15 @@ dialog, which proves the Capacitor bridge reaches the ArkTS plugins; from a sub-
 the page history, and on the dashboard a first back arms "press again to exit" and a second one
 leaves. No CORS errors, no JS console errors, no crash logs.
 
+**Retail-device install (2026-11-08, pending a Huawei-issued profile).** The v1.4.4 bundle rebuilt
+cleanly (`BUILD SUCCESSFUL`, 33 tasks) and the HAP was checked for `opengym-flavor=mobile`, the
+chunk carrying `opengym:back`, and `1.4.4 / 1004004` in `module.json`. On a `VOL-AL00` the
+OpenHarmony-signed HAP was refused with `9568257`; device time matched the host and the profile
+validity covered it, so the untrusted root above is the whole cause. `devecocli signature generate`
+then declined the account as not real-name verified. Nothing in the app needs changing: once a
+Huawei-issued certificate and profile exist, `hap-sign-tool.jar sign-app` can re-sign the same
+unsigned HAP without another full build.
+
 Getting there exposed three defects that static review had missed, all fixed below:
 
 1. **Blank screen** — `resource://` cannot serve CORS-fetched module scripts. Fixed with the
@@ -236,7 +256,9 @@ on 2026-11-07 (only web bundle content, the app version and documentation change
   (`1.4.4` after the upstream sync) — see `AppScope/app.json5`. Keep them in step when the app
   version moves.
 - Signing is not committed. DevEco's automatic signing writes `build-profile.json5`, so expect a
-  local diff there after the first build.
+  local diff there after the first build; the `.p12` / `.cer` / `.p7b` material is ignored by
+  `.gitignore`. Real-device signing additionally needs a real-name-verified Huawei developer
+  account — see the signing note at the top of this file.
 - `fileAccess(true)` is still on in `pages/Index.ets`. Media no longer needs it (that goes through
   `onInterceptRequest`), so it can be turned off once nothing else turns out to depend on it —
   worth doing, since it is the wider of the two doors.
