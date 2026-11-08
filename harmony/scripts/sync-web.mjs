@@ -3,9 +3,11 @@
  *
  * The HarmonyOS shell serves the bundle straight out of the package:
  *
- *     Web({ src: $rawfile('www/index.html') })        entry/src/main/ets/pages/Index.ets
+ *     Web({ src: APP_ENTRY_URL })   // https://opengym.app/index.html, pages/Index.ets
  *
- * so `entry/src/main/resources/rawfile/www/` has to hold exactly what `frontend/dist` holds. Two
+ * so `entry/src/main/resources/rawfile/www/` has to hold exactly what `frontend/dist` holds:
+ * `onInterceptRequest` maps that HTTPS pseudo-origin back to rawfile, because a `resource://`
+ * document has a null origin and ArkWeb blocks its crossorigin module scripts. Two
  * things make that work without a server, and both are the app's own choices rather than anything
  * this script does: `base: './'` in frontend/vite.config.js keeps every asset URL relative, and
  * the router is a HashRouter, so no deep link needs a rewrite.

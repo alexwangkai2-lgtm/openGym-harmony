@@ -7,16 +7,30 @@
 // The app build (MOBILE) decodes with @capacitor-mlkit/barcode-scanning (Apache-2.0, see
 // NOTICE.md), dynamic-imported so it never lands in the web bundle. In a browser — the PWA on a
 // phone is the common case — photo import goes through lib/scan-web.js (BarcodeDetector where the
-// browser has one, jsQR otherwise). scanCode() itself is app-only: ML Kit brings its own camera
+// browser has one, jsQR and lib/barcode.js otherwise). scanCode() itself is app-only: ML Kit brings its own camera
 // UI, the browser path is a React sheet and lives with the view.
+// The F-Droid build has no ML Kit (Google's, closed source; app/build.gradle leaves the plugin
+// out), so there the app takes the browser's way for both: webScanner() says which.
 //
 // What comes back is a normalized { value, fmt } (or null when the user cancels / nothing was
 // found). `value` is the code's machine-readable content; `fmt` is a lower-cased symbology token
 // matching lib/qr.js's normalizeFmt. The caller checks canRenderFmt(fmt) before saving — we can
-// read many barcode kinds but only redraw QR, so a non-QR code is reported and refused there, not
-// silently stored.
-import { MOBILE, isHarmonyOS } from './mobile.js'
+// read many barcode kinds but only redraw QR and a few 1D ones, so any other code is reported and
+// refused there, not silently stored.
+import { MOBILE } from './mobile.js'
+import { isHarmonyOS } from './harmony.js'
 import { normalizeFmt } from './qr.js'
+import { nativeScanner } from './channel.js'
+
+/** True where scanning goes the browser's way (CameraScan + lib/scan-web.js): the web, and the
+ *  F-Droid build, which has no ML Kit. */
+export async function webScanner() {
+  if (!MOBILE) return true
+  // HarmonyOS has no ML Kit bridge. ArkWeb is Chromium, so the page-side decoder
+  // (BarcodeDetector / jsQR in lib/scan-web.js) is the right tool there.
+  if (await isHarmonyOS()) return true
+  try { return !(await nativeScanner()) } catch { return false }
+}
 
 // A found barcode from either path → our stored shape. mlkit gives rawValue (machine-readable,
 // what a turnstile actually reads) and a BarcodeFormat; we keep rawValue and fold the format.
@@ -33,11 +47,7 @@ function toCode(barcode) {
 // denied so the caller can explain why.
 export async function scanCode() {
   if (!MOBILE) throw new Error('Scanning is only available in the app')
-  // Live scanning needs a native scanner UI. HarmonyOS has no equivalent bridged, and there is no
-  // in-page fallback for a live camera in the app build (components/CameraScan.jsx is the
-  // browser-only path, reached through the view when !MOBILE). Report it as unsupported so the
-  // caller shows its "not available" message instead of surfacing a rejected call against a plugin
-  // that was never registered.
+  // Live ML Kit scanning is not bridged on HarmonyOS; photo import still works.
   if (await isHarmonyOS()) throw new Error('unsupported')
   const { BarcodeScanner } = await import('@capacitor-mlkit/barcode-scanning')
 
@@ -57,10 +67,7 @@ export async function scanCode() {
 // path, decode, then delete the temp file. Returns the first barcode, or null if none was found.
 export async function importCodeFromImage(file) {
   if (!file) return null
-  // HarmonyOS decodes in the page: the web path already exists for the browser build
-  // (lib/scan-web.js — BarcodeDetector where present, jsQR otherwise), and ArkWeb is Chromium, so
-  // it is the right tool there. The native ML Kit module is not bridged on this platform.
-  if (!MOBILE || await isHarmonyOS()) return (await import('./scan-web.js')).importCodeFromImageWeb(file)
+  if (await webScanner()) return (await import('./scan-web.js')).importCodeFromImageWeb(file)
   const { BarcodeScanner } = await import('@capacitor-mlkit/barcode-scanning')
   const { Filesystem, Directory } = await import('@capacitor/filesystem')
 

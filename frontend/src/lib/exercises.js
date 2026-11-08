@@ -2,6 +2,7 @@ import { EXDB, EXALIAS } from './exercises-data.js'
 import MUSCLE_MAP from './exercise-muscle-map.json' with { type: 'json' }
 import V13_IDS from './catalogue-v13-ids.json' with { type: 'json' }
 import { t, getVersion, exerciseNameSearchText } from './i18n-core.js'
+import { exerciseAliases, aliasSnapshot } from './exercise-aliases.js'
 
 export { EXDB }
 
@@ -28,6 +29,8 @@ const SECONDARY_ADDITIONS = {
   '0293': ['rear deltoids'], // dumbbell bent over row
   '0499': ['rear deltoids'], // inverted row
   '0861': ['rear deltoids'], // cable seated row
+  '4133': ['lower back'], // kettlebell suitcase deadlift (#693)
+  '10189': ['lower back'], // weighted plate deadlift rear lunge with overhead press (#693)
 }
 
 // Secondary muscles for an exercise, with the small conservative additions applied as an
@@ -69,6 +72,14 @@ export function categoriesOf(list) {
   const have = new Set(list.map(e => e.cat).filter(Boolean))
   return CATEGORIES.filter(c => have.has(c))
 }
+// The Type chip row's filter, shared by the Library and the exercise picker (issue #521): the
+// options left in `list`, the choice still in effect, and the list narrowed to it. A choice the
+// search or body part has narrowed away is ignored for now, never a dead end.
+export function byCategory(list, cat) {
+  const opts = categoriesOf(list)
+  const on = opts.includes(cat) ? cat : ''
+  return { opts, on, list: on ? list.filter(e => e.cat === on) : list }
+}
 
 // Custom (user-created) exercises live in synced state S.customEx (issue #11) and are
 // merged into the id index here so every EXIDX[id] lookup keeps working unchanged.
@@ -84,6 +95,10 @@ export function registerCustom(list) {
   customIds = new Set(xs.map(e => e.id))
   xs.forEach(e => { EXIDX[e.id] = e })
 }
+
+// A built-in catalogue entry itself (never a copy, a snapshot or a custom one). Those objects never
+// change while the app runs, so what is derived from them alone can be remembered (muscles.js).
+export const isBuiltinEx = ex => BUILTIN.has(ex)
 
 // Whether an exercise is one of the user's own (#378, #358). Where it lives decides, not the
 // `custom` flag alone: a plan import before 1.3.8 (a shared plan file, a plan from the AI coach)
@@ -107,7 +122,15 @@ export function healCustomEx(list) {
   return changed ? out : list
 }
 // Full searchable catalogue — customs first so your own exercises are easy to find.
-export const allExercises = st => [...(st.customEx || []), ...CATALOGUE]
+// Every exercise you can pick: yours, then the catalogue's, less any merged into another (#656,
+// lib/exercise-merge.js): a catalogue exercise cannot be removed, so a merge hides it instead.
+export const allExercises = st => {
+  const all = [...(st?.customEx || []), ...CATALOGUE]
+  const m = st?.exMerged
+  if (!m || typeof m !== 'object') return all
+  const away = new Set(Object.keys(m).filter(k => m[k] && m[k].into))
+  return away.size ? all.filter(e => !away.has(e.id)) : all
+}
 
 function searchableText(value) {
   if (Array.isArray(value)) return value.map(searchableText).join(' ')
@@ -129,13 +152,13 @@ function isSubsequence(needle, hay) {
 // field prefix, then word-boundary starts, then substrings (closer to the start scores
 // better), and finally typo-tolerant ordered subsequences. Fields are weighted - the name
 // dominates, target/equipment matter, muscles and description are supporting evidence.
-// 0 means no match, so matchesExerciseSearch stays a boolean filter while the picker can
-// rank results by score.
+// 0 means no match, so a filter can test `> 0` while the picker ranks results by score.
 export function searchScore(exercise, query) {
   const needle = searchableText(query).toLowerCase().trim()
   if (!needle) return 1
-  const source = exercise && typeof exercise === 'object' ? exercise : {}
-  const fields = [['n', 100], ['tg', 40], ['eq', 40], ['sm', 30], ['muscleGroups', 30], ['primaries', 30], ['secondaries', 30], ['desc', 10], ['cues', 10]]
+  const ex = exercise && typeof exercise === 'object' ? exercise : {}
+  const source = { ...ex, aliases: exerciseAliases(ex) }
+  const fields = [['n', 100], ['aliases', 100], ['tg', 40], ['eq', 40], ['sm', 30], ['muscleGroups', 30], ['primaries', 30], ['secondaries', 30], ['desc', 10], ['cues', 10]]
   // Token-level matching: every query word must match somewhere (any order), so
   // "press bench" finds "Bench Press". The score sums each token's best hit.
   const tokens = needle.split(/[^a-z0-9]+/).filter(Boolean)
@@ -159,10 +182,6 @@ export function searchScore(exercise, query) {
   return total
 }
 
-export function matchesExerciseSearch(exercise, query) {
-  return searchScore(exercise, query) > 0
-}
-
 // Media normally sits next to the app (img/ and gif/, mounted into the web container).
 // A build can point them somewhere else — the demo build pulls them off a CDN instead of
 // shipping ~140 MB of images into the deployment. `import.meta.env` is undefined in plain
@@ -172,6 +191,11 @@ const ENV = import.meta.env || {}
 // dataset's media over img/ and gif/, and would hide the catalogue's files if they lived there.
 const IMG_BASE = ENV.VITE_IMG_BASE || 'exercise-media/still/'
 const GIF_BASE = ENV.VITE_GIF_BASE || 'exercise-media/clip/'
+// The animations are MP4 loops, except in the Android release: there they are animated WebP
+// (VITE_CLIP_EXT=webp, staged from APP_MEDIA_DIR), shown as a plain image. The WebView's video
+// player stalled at every loop of these 3-second clips on real phones; an image decodes like the
+// GIFs the app had before and loops by itself.
+const CLIP_EXT = ENV.VITE_CLIP_EXT === 'webp' ? '.webp' : '.mp4'
 // About 940 exercises are drawn twice, on a male and on a female figure: `fv` names the female
 // drawing of a male exercise, `mv` the male drawing of a female one. Which figure shows is a
 // setting (figureOf); the exercise, its id and everything logged against it stay the same either
@@ -182,12 +206,32 @@ export const figureOf = S => (S?.exFigure === 'female' || S?.exFigure === 'male'
   : (S?.body === 'female' ? 'female' : 'male')
 const drawing = (ex, figure) => (figure === 'female' ? ex.fv : figure === 'male' ? ex.mv : null) || null
 export const imgSrc = (ex, figure) => IMG_BASE + (drawing(ex, figure) ? drawing(ex, figure) + '.webp' : ex.img)
-export const gifSrc = (ex, figure) => GIF_BASE + (drawing(ex, figure) ? drawing(ex, figure) + '.mp4' : ex.gif)
+const clipFile = f => (CLIP_EXT !== '.mp4' && f.endsWith('.mp4') ? f.slice(0, -4) + CLIP_EXT : f)
+export const gifSrc = (ex, figure) => GIF_BASE + clipFile(drawing(ex, figure) ? drawing(ex, figure) + '.mp4' : ex.gif)
 // The catalogue's animations are short MP4 loops; a fork's or an older build's may still be GIFs.
 export const isVideoSrc = src => /\.(mp4|webm)(\?|$)/i.test(src || '')
 
+// An exercise from either its id or itself: most helpers below take both.
+export const exerciseOf = idOrEx => (typeof idOrEx === 'string' ? EXIDX[idOrEx] : idOrEx)
+
 // Cardio exercises log time + speed instead of weight × reps.
-export const isCardio = idOrEx => (typeof idOrEx === 'string' ? EXIDX[idOrEx] : idOrEx)?.bp === 'cardio'
+export const isCardio = idOrEx => exerciseOf(idOrEx)?.bp === 'cardio'
+
+// Static holds (planks, wall sits, levers, hangs): the catalogue marks the exercises that are only
+// ever held ("hold": true), so a freshly added one starts as a timed hold rather than as reps.
+export const isHold = idOrEx => !!(typeof idOrEx === 'string' ? EXIDX[idOrEx] : idOrEx)?.hd
+
+// Exercises done one arm or leg at a time, by their catalogue name: "single leg", "one arm",
+// "single-arm", "unilateral". Stretches and rollers are mobility, not sets, and a single-leg
+// push-up or plank is a two-arm exercise with a leg lifted. Like `isBodyweightEq`, this only seeds
+// a fresh config (`side: true`); the flag lives on the config, so either way can be switched.
+const ONE_LIMB = /\b(single|one)[\s-]+(arm|leg|hand)\b|\bunilateral\b/i
+const NOT_ONE_LIMB = /stretch|\broll(er|ball)?\b|two to one|single leg (push|plank)|leg push up/i
+export const isOneLimb = idOrEx => {
+  const ex = typeof idOrEx === 'string' ? EXIDX[idOrEx] : idOrEx
+  if (!ex || ex.custom || ex.bp === 'cardio') return false
+  return ONE_LIMB.test(ex.n || '') && !NOT_ONE_LIMB.test(ex.n || '')
+}
 
 // Exercises the dataset already knows carry no external load (issue #32) — a quarter of the
 // catalogue. This seeds the `bw` flag on a fresh config so a push-up never asks for a weight
@@ -198,7 +242,7 @@ export const isCardio = idOrEx => (typeof idOrEx === 'string' ? EXIDX[idOrEx] : 
 // per-exercise Bodyweight switch still overrides it either way (issue #39).
 const BODYWEIGHT_EQ = new Set(['body weight', 'band', 'resistance band'])
 export const isBodyweightEq = idOrEx =>
-  BODYWEIGHT_EQ.has((typeof idOrEx === 'string' ? EXIDX[idOrEx] : idOrEx)?.eq)
+  BODYWEIGHT_EQ.has(exerciseOf(idOrEx)?.eq)
 
 // Equipment that is a load in its own right: a bar, a bell, a stack, a sled, a weight. A set on
 // one of these logged at 0 kg is a number nobody typed in. The rest of the catalogue that is not
@@ -207,7 +251,7 @@ export const isBodyweightEq = idOrEx =>
 // reps instead (lib/progression.js).
 const LOADED_EQ = new Set(['barbell', 'ez barbell', 'olympic barbell', 'trap bar', 'dumbbell', 'kettlebell', 'clubbell', 'macebell', 'cable', 'leverage machine', 'smith machine', 'sled machine', 'weighted'])
 export const isLoadedEq = idOrEx =>
-  LOADED_EQ.has((typeof idOrEx === 'string' ? EXIDX[idOrEx] : idOrEx)?.eq)
+  LOADED_EQ.has(exerciseOf(idOrEx)?.eq)
 
 /* Assistance machines run the other way round: the stack carries part of your body weight, so
  * a smaller number is the harder set and the record (issue #232). Getting the set wrong is
@@ -293,11 +337,11 @@ const VOCAB = new Set()
 function corpusOf(e) {
   const v = getVersion()
   const hit = corpusCache.get(e)
-  if (hit && hit.v === v) return hit
+  if (hit && hit.v === v && hit.aliases === aliasSnapshot()) return hit
   const sm = Array.isArray(e?.sm) ? e.sm : []
   const name = normalizeStr(exerciseNameSearchText(e))
   const s = normalizeStr([
-    name,
+    name, ...exerciseAliases(e),
     e?.tg || '', t(e?.tg || ''),
     e?.eq || '', t(e?.eq || ''),
     e?.bp || '', t(e?.bp || ''),
@@ -309,7 +353,7 @@ function corpusOf(e) {
   // a body part and an equipment word would start matching as one.
   // The joined form only counts from the start of a name word, or "thigh" would find "sumo
   // deadlift high pull" through "deadlifthighpull".
-  const entry = { v, s, name, ...joinedOf(name), nameWords: name.split(/[\s\-‐-―()/,]+/).filter(Boolean) }
+  const entry = { v, s, name, aliases: aliasSnapshot(), ...joinedOf(name), nameWords: name.split(/[\s\-‐-―()/,]+/).filter(Boolean) }
   for (const w of entry.nameWords) VOCAB.add(w)
   corpusCache.set(e, entry)
   return entry
@@ -521,7 +565,25 @@ function tokenScore(entry, tok, ctx) {
 const CLASSIC = new Set(V13_IDS)
 const EQ_PRIOR = { barbell: 4, dumbbell: 4, cable: 3, 'leverage machine': 3, 'body weight': 3, 'smith machine': 2, kettlebell: 2, 'ez barbell': 2, 'sled machine': 2 }
 const CAT_PRIOR = { strength: 3, calisthenics: 3, olympic: 2, plyometrics: 1, isometric: 1, stretching: -3, mobility: -3, rehab: -4, yoga: -2, pilates: -2 }
-const priorOf = e => (CLASSIC.has(e.id) ? 3 : 0) + (EQ_PRIOR[e.eq] || 0) + (CAT_PRIOR[e.cat] || 0)
+// The one version every gym has, where the catalogue's name hides it: "leg press" means the 45°
+// sled, not the Smith machine or a one-leg variant (Discord, 2026-10-09).
+const EVERYDAY = { '0739': 6 }
+const priorOf = e => (CLASSIC.has(e.id) ? 3 : 0) + (EQ_PRIOR[e.eq] || 0) + (CAT_PRIOR[e.cat] || 0) + (EVERYDAY[e.id] || 0)
+
+// The lifts most people mean when they search a muscle ("chest", "back", "Beine"): the staples of
+// a commercial gym, so a muscle search opens on the bench press and the pulldown instead of the
+// alphabetically first stretches (Discord, 2026-10-27).
+const STAPLES = new Set([
+  '0025', '0047', '0289', '0314', '0251', '0155', '0308', '0662', '0596', '0576',          // chest
+  '0652', '1326', '0198', '0027', '0861', '0032', '0292', '0293', '0606',                 // back
+  '0043', '3593', '0739', '0585', '0586', '0599', '0085', '0336', '1060', '0605', '1372', // legs, glutes, calves
+  '1162', '0405', '0334', '0178',                                                         // shoulders
+  '0031', '0294', '0313', '2249', '0060', '0061',                                         // arms
+  '0274', '0463', '0472', '0175',                                                         // core
+])
+const STRETCHY = new Set(['stretching', 'mobility', 'rehab', 'yoga', 'pilates'])
+// Body part and target muscle words of an exercise, in English and in the reader's language.
+const bodyWordsOf = e => new Set(normalizeStr([e?.bp || '', t(e?.bp || ''), e?.tg || '', t(e?.tg || '')].join(' ')).split(' ').filter(Boolean))
 
 // A name that is the query itself wins outright: as typed or in the singular 50, with the typos
 // the search allows for its length 40 ("sqat" is the exercise called "squat", not "dumbbell squat").
@@ -538,8 +600,22 @@ function rankByRelevance(found, tokens) {
   // The query as typed, and with each word in its singular: "pull ups" is the name "pull-up".
   const typedForms = [...new Set([tokens, tokens.map(tok => formsOf(tok).find(f => f !== tok && !f.includes(' ')) || tok)]
     .map(list => list.join(' ').replace(/[-‐-―]/g, ' ')))]
+  // A search that is only muscle or body-part words ranks by what the exercise trains and how
+  // common it is, not by which names happen to contain the word: otherwise "chest" opens on
+  // "above head chest stretch". A stretch only leads when the search asks for one.
+  const bodyTok = tok => formsOf(tok).some(f => found.some(e => bodyWordsOf(e).has(f)))
+  const bodyMode = tokens.length > 0 && tokens.every(bodyTok)
+  const wantsStretch = tokens.some(tok => /^(stretch|mobil|yoga|dehn|étir|estir|allung)/.test(tok))
   const scored = found.map((e, i) => {
     const entry = corpusOf(e)
+    if (bodyMode) {
+      const bw = bodyWordsOf(e)
+      const trains = tokens.every(tok => formsOf(tok).some(f => bw.has(f)))
+      const named = Math.min(60, tokens.reduce((sum, tok) => sum + tokenScore(entry, tok, ctx), 0))
+      const score = (trains ? 70 : named) + (STAPLES.has(e.id) ? 30 : 0) + priorOf(e)
+        + (STRETCHY.has(e.cat) && !wantsStretch ? -25 : 0)
+      return { e, i, score, len: entry.nameWords.length }
+    }
     // The name exactly as typed wins outright ("burpee" before "dumbbell burpee"), and every
     // word the name has beyond the query costs a little, more than the equipment preference.
     const plain = entry.name.split(' (')[0].replace(/[-‐-―]/g, ' ')

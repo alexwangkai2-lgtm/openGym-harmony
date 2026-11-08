@@ -9,12 +9,13 @@ files that changed did so to stop assuming Android, and each one says so in plac
 
 | File | Change |
 | --- | --- |
-| `frontend/src/lib/mobile.js` | `isHarmonyOS()`, `isNativeShell()` beside the existing `isAndroid()` |
-| `frontend/src/lib/rest-alert.js` | `isAndroid()` → `isNativeShell()` (the rest alert *is* bridged here) |
-| `frontend/src/lib/system-bars.js` | same |
-| `frontend/src/lib/scan.js` | live camera scan reports `unsupported`; photo import uses the in-page decoder |
+| `frontend/src/lib/harmony.js` | **new** — `isHarmonyOS()` / `isNativeShell()` off `Capacitor.getPlatform()`. Kept out of `mobile.js` because dozens of upstream tests mock that module with a narrow export list. |
+| `frontend/src/lib/mobile.js` | upstream's `nativePlatform()` stays `'android' \| 'ios' \| null` (it also drives iOS-only branches); HarmonyOS is detected separately |
+| `frontend/src/lib/rest-alert.js` | `nativePlatform()` → `isNativeShell()` (the rest alert *is* bridged here) |
+| `frontend/src/lib/system-bars.js` | a `platform === 'harmony'` branch alongside Android/iOS |
+| `frontend/src/lib/scan.js` | `webScanner()` returns true on HarmonyOS; live camera scan reports `unsupported` |
 | `frontend/src/lib/capacitor-fetch.js` | no `CapacitorHttp` bridge — falls back to `fetch` |
-| `frontend/src/lib/back.js` | back press arrives as a DOM event from the shell |
+| `frontend/src/lib/back.js` | back press arrives as a DOM event from the shell; upstream's `pathname`/tour logic is kept |
 
 ## Why a shell rather than a port
 
@@ -198,12 +199,42 @@ real interactive session or real media.
 8. **Pairing with a server** — the server needs no changes: its CSRF check already exempts a
    `Bearer` token (`api/server.js`), which is what the mobile shell sends.
 
+## Upstream sync (2026-11-08)
+
+The web app now tracks upstream `DuarteSantos8/openGym` `main` at `8fb98b1` (**v1.4.4**). This
+fork started from a standalone 1.4.0 snapshot rather than a git fork, so the update was applied
+as a three-way merge against upstream v1.4.0: 2699 upstream-only changes taken verbatim, 29
+deleted paths removed, and the 14 files both sides had touched re-based by re-applying the
+HarmonyOS adaptations on top of the new upstream text. The 263 MB exercise-media catalogue stays
+out of the repository and is staged into the HAP at build time. `AppScope/app.json5` now reports
+1.4.4 to match `frontend/package.json`.
+
+**Capacitor 7 to 8.** Upstream 1.4.4 moved `@capacitor/core` to 8.5.3 and the plugins to 8.x. The
+bridge contract the shim depends on did not change: `CapacitorCustomPlatform` is still read into a
+module-level constant at document start, `getPlatform()` still returns `capCustomPlatform.name`,
+`PluginHeaders.methods` is still `{ name, rtype }` with `rtype === 'promise'` routing to
+`nativePromise`, and core still picks `addListenerNative` only when a plugin header exists.
+`@capacitor/app`'s `AppWeb` still reads `document.hidden` and listens on `visibilitychange`. So
+`Shim.ets`, `PluginRegistry.ets` and `AppPlugin.ets` needed no changes.
+
+Upstream also introduced `nativePlatform()` (`'android' | 'ios' | null`). It deliberately keeps
+returning `null` on HarmonyOS, because upstream uses it for iOS-only branches (Live Activities,
+watch sync, voice). `lib/harmony.js` detects the shell instead, and `back.js`, `rest-alert.js`,
+`scan.js` and `system-bars.js` opt into the shared plugin set explicitly. Upstream's iOS-only
+features take their web paths here, consistent with the degraded table above. Upstream 1.4.4 also
+added an iOS rest alert, so `isNativeShell()` now includes iOS alongside Android and HarmonyOS.
+
+After the sync the mobile bundle rebuilds with `VITE_MOBILE=1` and passes `checkCopy`; 102 unit
+tests across the seven affected suites pass; and the ArkTS tree is byte-for-byte the one verified
+on 2026-11-07 (only web bundle content, the app version and documentation changed).
+
 ## Notes for whoever picks this up
 
 - `entry/src/main/resources/rawfile/www/` is build output. It is not in version control and
   `sync-web.mjs` replaces it entirely; do not edit it in place.
 - The bundle name is `ch.duartesantos.opengym` and the version tracks `frontend/package.json`
-  (`1.4.0`) — see `AppScope/app.json5`. Keep them in step when the app version moves.
+  (`1.4.4` after the upstream sync) — see `AppScope/app.json5`. Keep them in step when the app
+  version moves.
 - Signing is not committed. DevEco's automatic signing writes `build-profile.json5`, so expect a
   local diff there after the first build.
 - `fileAccess(true)` is still on in `pages/Index.ets`. Media no longer needs it (that goes through
